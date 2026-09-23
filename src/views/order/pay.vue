@@ -1,7 +1,7 @@
 <template>
   <MallShell>
     <div class="inner pay-page">
-      <a-spin :spinning="loading">
+      <a-spin :spinning="loading || paying">
         <template v-if="order">
           <a-result
             v-if="order.status === 1"
@@ -42,21 +42,38 @@
             <div class="pay-select">
               <h3>选择支付方式</h3>
               <a-radio-group v-model:value="payType" class="pay-group">
+                <a-radio-button value="wxpay"><span class="pay-wx">微信扫码支付</span></a-radio-button>
                 <a-radio-button value="alipay"><span class="pay-alipay">支付宝</span></a-radio-button>
-                <a-radio-button value="wxpay"><span class="pay-wx">微信支付</span></a-radio-button>
               </a-radio-group>
-              <a-alert
-                style="margin-top: 16px"
-                type="info"
-                show-icon
-                message="演示支付"
-                description="未配置真实商户密钥时，将模拟支付宝/微信支付回调并完成扣库存。"
-              />
+
+              <!-- 选中微信即展示付款码，无需再点「获取」 -->
+              <div v-if="payType === 'wxpay'" class="wx-native">
+                <div v-if="displayCodeUrl" class="qr-panel">
+                  <div class="qr-frame">
+                    <img :src="qrSrc(displayCodeUrl)" alt="微信扫码支付" />
+                    <div v-if="payInfo?.demoMode !== false" class="demo-badge">演示码</div>
+                  </div>
+                  <div class="qr-side">
+                    <h4>请打开手机微信扫一扫</h4>
+                    <p class="amt">应付 <em>¥{{ formatPrice(order.totalAmount) }}</em></p>
+                    <p class="tip">{{ payInfo?.payTip || '请使用微信扫码完成支付' }}</p>
+                    <a-space>
+                      <a-button type="primary" class="wx-btn" :loading="polling" @click="onConfirmWxPaid">
+                        {{ payInfo?.demoMode === false ? '我已完成支付' : '模拟扫码支付成功' }}
+                      </a-button>
+                      <a-button :loading="paying" @click="fetchWxQr(true)">刷新二维码</a-button>
+                    </a-space>
+                  </div>
+                </div>
+                <div v-else class="qr-loading">正在拉起微信付款码…</div>
+              </div>
+
+              <div v-else class="ali-todo">
+                <a-alert type="info" show-icon message="支付宝收银台后续接入" description="本期先完成微信扫码，支付宝暂不处理。" />
+              </div>
+
               <div class="actions">
                 <a-button size="large" @click="$router.push('/order')">稍后支付</a-button>
-                <a-button type="primary" size="large" class="jd-btn" :loading="paying" @click="onPay">
-                  {{ payType === 'alipay' ? '去支付宝支付' : '去微信支付' }}
-                </a-button>
               </div>
             </div>
           </template>
@@ -73,9 +90,9 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message, Modal } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import MallShell from '@/layouts/MallShell.vue'
 import { getOrder, mockPaySuccess, preparePay } from '@/api/order'
 
@@ -83,11 +100,103 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const paying = ref(false)
+const polling = ref(false)
 const order = ref(null)
-const payType = ref('alipay')
+const payType = ref('wxpay')
+const payInfo = ref(null)
+let pollTimer = null
+let fetching = false
+
+const displayCodeUrl = computed(() => {
+  if (payInfo.value?.codeUrl) return payInfo.value.codeUrl
+  if (payType.value === 'wxpay' && order.value?.orderNo) {
+    return `weixin://wxpay/bizpayurl?pr=DEMO${order.value.orderNo}`
+  }
+  return ''
+})
 
 function formatPrice(p) {
   return Number(p || 0).toFixed(2)
+}
+
+function qrSrc(url) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`
+}
+
+function stopPoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function startPoll() {
+  stopPoll()
+  if (payInfo.value?.demoMode !== false) return
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await getOrder(route.params.orderNo)
+      order.value = res.data
+      if (res.data?.status === 1) {
+        stopPoll()
+        message.success('支付成功')
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }, 3000)
+}
+
+async function fetchWxQr(manual = false) {
+  if (fetching) return
+  fetching = true
+  paying.value = true
+  try {
+    const prep = await preparePay(route.params.orderNo, 'wxpay')
+    const data = prep.data || {}
+    if (!data.codeUrl) {
+      data.codeUrl = `weixin://wxpay/bizpayurl?pr=DEMO${route.params.orderNo}`
+      data.demoMode = true
+    }
+    payInfo.value = data
+    if (manual) {
+      message.success(data.demoMode ? '已刷新演示收款码' : '已刷新支付二维码')
+    }
+    startPoll()
+  } catch (e) {
+    // 接口失败仍展示本地演示码，避免空白
+    payInfo.value = {
+      demoMode: true,
+      codeUrl: `weixin://wxpay/bizpayurl?pr=DEMO${route.params.orderNo}`,
+      payTip: e?.message || '拉起支付失败，当前为演示码',
+    }
+  } finally {
+    paying.value = false
+    fetching = false
+  }
+}
+
+async function onConfirmWxPaid() {
+  polling.value = true
+  try {
+    if (payInfo.value?.demoMode !== false) {
+      const res = await mockPaySuccess(route.params.orderNo)
+      order.value = res.data
+      stopPoll()
+      message.success('支付成功')
+      return
+    }
+    const res = await getOrder(route.params.orderNo)
+    order.value = res.data
+    if (res.data?.status === 1) {
+      stopPoll()
+      message.success('支付成功')
+    } else {
+      message.info('尚未收到微信回调，请稍后再点或等待自动刷新')
+    }
+  } finally {
+    polling.value = false
+  }
 }
 
 async function load() {
@@ -95,41 +204,45 @@ async function load() {
   try {
     const res = await getOrder(route.params.orderNo)
     order.value = res.data
-    if (res.data?.payType) payType.value = res.data.payType
+    if (res.data?.payType === 'alipay') {
+      payType.value = 'alipay'
+    } else {
+      payType.value = 'wxpay'
+    }
   } finally {
     loading.value = false
   }
 }
 
-async function onPay() {
-  paying.value = true
-  try {
-    const prep = await preparePay(route.params.orderNo, payType.value)
-    const tip = prep.data?.payTip || '确认模拟支付？'
-    Modal.confirm({
-      title: prep.data?.payTypeText || '确认支付',
-      content: tip,
-      okText: '确认已支付',
-      cancelText: '取消',
-      onOk: async () => {
-        const res = await mockPaySuccess(route.params.orderNo)
-        order.value = res.data
-        message.success('支付成功')
-      },
-    })
-  } finally {
-    paying.value = false
+watch(payType, (v) => {
+  stopPoll()
+  if (v === 'wxpay' && order.value?.status === 0) {
+    fetchWxQr(false)
+  } else {
+    payInfo.value = null
   }
-}
+})
 
-onMounted(() => {
+watch(
+  () => order.value?.status,
+  (s) => {
+    if (s === 1) stopPoll()
+  }
+)
+
+onMounted(async () => {
   if (!localStorage.getItem('Access-Token')) {
     message.warning('请先登录')
     router.replace(`/login?redirect=${encodeURIComponent(route.fullPath)}`)
     return
   }
-  load()
+  await load()
+  if (order.value?.status === 0 && payType.value === 'wxpay') {
+    await fetchWxQr(false)
+  }
 })
+
+onBeforeUnmount(stopPoll)
 </script>
 
 <style scoped>
@@ -189,6 +302,76 @@ onMounted(() => {
   color: #07c160;
   font-weight: 600;
 }
+.wx-native {
+  margin-top: 20px;
+  padding: 20px;
+  background: #f7faf7;
+  border: 1px solid #d9f0dd;
+  border-radius: 6px;
+  min-height: 200px;
+}
+.qr-panel {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.qr-frame {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  padding: 10px;
+}
+.qr-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.demo-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #fa8c16;
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.qr-side h4 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.qr-side .amt {
+  margin: 0 0 8px;
+  color: #666;
+}
+.qr-side .amt em {
+  color: #e1251b;
+  font-style: normal;
+  font-size: 22px;
+  font-weight: 700;
+}
+.qr-side .tip {
+  color: #888;
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.qr-loading {
+  color: #666;
+  padding: 40px 0;
+  text-align: center;
+}
+.ali-todo {
+  margin-top: 16px;
+}
+.wx-btn {
+  background: #07c160 !important;
+  border-color: #07c160 !important;
+}
 .actions {
   margin-top: 20px;
   display: flex;
@@ -198,5 +381,11 @@ onMounted(() => {
 .jd-btn {
   background: #e1251b !important;
   border-color: #e1251b !important;
+}
+@media (max-width: 700px) {
+  .qr-panel {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

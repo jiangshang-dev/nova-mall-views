@@ -57,6 +57,8 @@
       <slot />
     </main>
 
+    <CsWidget />
+
     <footer class="footer">
       <div class="inner">
         <p>© {{ year }} Nova Mall · 自营 B2C 商城</p>
@@ -71,6 +73,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { logout as logoutApi } from '@/api/auth'
 import { useCartBadge } from '@/composables/useCartBadge'
+import CsWidget from '@/components/CsWidget.vue'
 
 const props = defineProps({
   modelKeyword: { type: String, default: '' },
