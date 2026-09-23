@@ -24,14 +24,17 @@
           </div>
           <div class="foot">
             <div>
-              {{ o.payTypeText || '未支付' }} · 合计
+              {{ o.payTypeText || '未支付' }}
+              <span v-if="o.deliveryName"> · {{ o.deliveryName }}</span>
+              · 合计
               <span class="total">¥{{ formatPrice(o.totalAmount) }}</span>
+              <span v-if="o.freightAmount != null" class="freight">（含运费 ¥{{ formatPrice(o.freightAmount) }}）</span>
             </div>
             <div class="ops">
               <a-button v-if="o.status === 0" type="primary" class="jd-btn" @click="$router.push(`/order/pay/${o.orderNo}`)">
                 去支付
               </a-button>
-              <a-button v-if="o.status === 0" @click="onCancel(o)">取消订单</a-button>
+              <a-button v-if="o.status === 0 || o.status === 5" @click="onCancel(o)">取消订单</a-button>
             </div>
           </div>
         </div>
@@ -136,6 +139,20 @@ onMounted(() => {
 }
 .status.s2 {
   color: #999;
+}
+.status.s3 {
+  color: #1677ff;
+}
+.status.s4 {
+  color: #52c41a;
+}
+.status.s5 {
+  color: #fa8c16;
+}
+.freight {
+  color: #999;
+  font-size: 12px;
+  margin-left: 4px;
 }
 .addr {
   font-size: 13px;

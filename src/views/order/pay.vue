@@ -15,6 +15,18 @@
             </template>
           </a-result>
 
+          <a-result
+            v-else-if="order.status === 5"
+            status="info"
+            title="货到付款订单已提交"
+            :sub-title="`订单号 ${order.orderNo}，请等待同城配送，收货时现金付款，运营核销后完成。应付 ¥${formatPrice(order.totalAmount)}`"
+          >
+            <template #extra>
+              <a-button type="primary" class="jd-btn" @click="$router.push('/order')">查看订单</a-button>
+              <a-button @click="$router.push('/')">继续购物</a-button>
+            </template>
+          </a-result>
+
           <template v-else-if="order.status === 0">
             <h2>订单支付</h2>
             <div class="pay-card">

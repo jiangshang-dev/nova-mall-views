@@ -73,7 +73,7 @@
                     <a-rate :value="commentSummary?.avgStar || 5" allow-half disabled />
                     <div class="avg-tip">综合评分</div>
                   </div>
-                  <div class="write" v-if="token">
+                  <div class="write" v-if="token && commentSummary?.canComment">
                     <div class="write-title">写评价</div>
                     <a-rate v-model:value="form.star" />
                     <a-textarea
@@ -95,7 +95,18 @@
                     </a-button>
                   </div>
                   <div v-else class="login-tip">
-                    <a-button type="link" @click="$router.push('/login')">登录后可评价</a-button>
+                    <template v-if="!token">
+                      <a-button type="link" @click="$router.push(`/login?redirect=${encodeURIComponent($route.fullPath)}`)">
+                        登录后可评价
+                      </a-button>
+                    </template>
+                    <template v-else>
+                      <a-alert
+                        type="info"
+                        show-icon
+                        :message="commentSummary?.commentTip || '购买并完成支付后才可以评价'"
+                      />
+                    </template>
                   </div>
                 </div>
 

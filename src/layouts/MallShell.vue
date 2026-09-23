@@ -5,7 +5,7 @@
         <div class="left">
           <span>你好，欢迎来到 Nova Mall</span>
           <template v-if="token">
-            <a class="link" @click.prevent>{{ displayName }}</a>
+            <router-link class="link accent" to="/user">{{ displayName }}</router-link>
             <a class="link" @click.prevent="onLogout">退出</a>
           </template>
           <template v-else>
@@ -17,6 +17,8 @@
           <router-link class="link" to="/">商城首页</router-link>
           <span class="sep">|</span>
           <router-link class="link" to="/order">我的订单</router-link>
+          <span class="sep">|</span>
+          <router-link class="link" to="/user">个人中心</router-link>
           <span class="sep">|</span>
           <a class="link" @click.prevent>客户服务</a>
         </div>
@@ -86,6 +88,14 @@ const { cartCount, refreshCartCount } = useCartBadge()
 onMounted(() => {
   refreshCartCount()
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    token.value = localStorage.getItem('Access-Token') || ''
+    displayName.value = localStorage.getItem('Nova-UserName') || '会员'
+  }
+)
 
 watch(
   () => props.modelKeyword,

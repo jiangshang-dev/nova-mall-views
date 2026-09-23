@@ -8,6 +8,13 @@
             <h3>收货地址</h3>
             <a-button type="link" @click="openAddress()">新增地址</a-button>
           </div>
+          <a-alert
+            v-if="serviceTip"
+            type="info"
+            show-icon
+            :message="serviceTip"
+            style="margin-bottom: 12px"
+          />
           <a-empty v-if="!addresses.length" description="请先添加收货地址">
             <a-button type="primary" class="jd-btn" @click="openAddress()">添加地址</a-button>
           </a-empty>
@@ -49,6 +56,29 @@
         </section>
 
         <section class="block">
+          <h3>配送方式</h3>
+          <a-empty v-if="!deliveryOptions.length" description="暂无可用配送方式" />
+          <div v-else class="delivery-list">
+            <div
+              v-for="opt in deliveryOptions"
+              :key="opt.deliveryType"
+              class="delivery-card"
+              :class="{ active: deliveryType === opt.deliveryType }"
+              @click="deliveryType = opt.deliveryType"
+            >
+              <div class="d-name">
+                <strong>{{ opt.deliveryName }}</strong>
+                <a-tag v-if="opt.freeShipping" color="green">免运费</a-tag>
+              </div>
+              <div class="d-tip">{{ opt.tip }}</div>
+              <div class="d-freight">
+                {{ opt.freeShipping ? '¥0.00' : `¥${formatPrice(opt.payableFreight)}` }}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="block">
           <h3>支付方式</h3>
           <a-radio-group v-model:value="payType" class="pay-group">
             <a-radio-button value="alipay">
@@ -57,7 +87,18 @@
             <a-radio-button value="wxpay">
               <span class="pay-wx">微信支付</span>
             </a-radio-button>
+            <a-radio-button value="cod">
+              <span class="pay-cod">货到付款（现金）</span>
+            </a-radio-button>
           </a-radio-group>
+          <a-alert
+            v-if="payType === 'cod'"
+            style="margin-top: 12px"
+            type="warning"
+            show-icon
+            message="货到付款说明"
+            description="下单后由同城配送，收货时现金付款，运营人员在后台核销后订单完成。"
+          />
           <a-textarea
             v-model:value="remark"
             :rows="2"
@@ -69,9 +110,13 @@
         </section>
 
         <div class="submit-bar">
-          <div>
-            应付合计：
-            <span class="total">¥{{ formatPrice(totalAmount) }}</span>
+          <div class="sum">
+            <div class="sum-line">商品金额：¥{{ formatPrice(goodsAmount) }}</div>
+            <div class="sum-line">运费：¥{{ formatPrice(freightAmount) }}</div>
+            <div>
+              应付合计：
+              <span class="total">¥{{ formatPrice(payableAmount) }}</span>
+            </div>
           </div>
           <a-button type="primary" size="large" class="jd-btn" :loading="submitting" @click="onSubmit">
             提交订单
@@ -119,13 +164,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import MallShell from '@/layouts/MallShell.vue'
 import { listAddress, removeAddress, saveAddress, setDefaultAddress } from '@/api/address'
 import { listCart } from '@/api/cart'
 import { createOrder } from '@/api/order'
+import { getFreightOptions } from '@/api/freight'
 import { useCartBadge } from '@/composables/useCartBadge'
 import regionOptions from '@/data/china-regions.json'
 
@@ -140,6 +186,9 @@ const addresses = ref([])
 const selectedAddressId = ref(null)
 const items = ref([])
 const payType = ref('alipay')
+const deliveryType = ref('')
+const deliveryOptions = ref([])
+const serviceTip = ref('')
 const remark = ref('')
 const cartItemIds = ref([])
 
@@ -157,9 +206,17 @@ const addrForm = reactive({
   isDefault: 0,
 })
 
-const totalAmount = computed(() =>
+const goodsAmount = computed(() =>
   items.value.reduce((s, i) => s + Number(i.price || 0) * (i.quantity || 0), 0)
 )
+
+const selectedDelivery = computed(() =>
+  deliveryOptions.value.find((o) => o.deliveryType === deliveryType.value)
+)
+
+const freightAmount = computed(() => Number(selectedDelivery.value?.payableFreight || 0))
+
+const payableAmount = computed(() => goodsAmount.value + freightAmount.value)
 
 function formatPrice(p) {
   return Number(p || 0).toFixed(2)
@@ -209,6 +266,16 @@ async function loadItems() {
   }
   items.value = rows
   cartItemIds.value = rows.map((i) => i.id)
+}
+
+async function loadFreight() {
+  const res = await getFreightOptions(goodsAmount.value)
+  const data = res.data || {}
+  serviceTip.value = data.serviceTip || ''
+  deliveryOptions.value = data.options || []
+  if (!deliveryOptions.value.find((o) => o.deliveryType === deliveryType.value)) {
+    deliveryType.value = deliveryOptions.value[0]?.deliveryType || ''
+  }
 }
 
 function openAddress(record) {
@@ -275,23 +342,34 @@ function onRemoveAddr(a) {
 
 async function onSubmit() {
   if (!selectedAddressId.value) return message.warning('请选择收货地址')
+  if (!deliveryType.value) return message.warning('请选择配送方式')
   if (!items.value.length) return message.warning('没有可结算商品')
   submitting.value = true
   try {
     const payload = {
       addressId: selectedAddressId.value,
       payType: payType.value,
+      deliveryType: deliveryType.value,
       remark: remark.value,
       cartItemIds: cartItemIds.value,
     }
     const res = await createOrder(payload)
     await refreshCartCount()
-    message.success('订单已创建，请支付')
-    router.replace(`/order/pay/${res.data.orderNo}`)
+    if (payType.value === 'cod') {
+      message.success('订单已提交，等待配送核销')
+      router.replace('/order')
+    } else {
+      message.success('订单已创建，请支付')
+      router.replace(`/order/pay/${res.data.orderNo}`)
+    }
   } finally {
     submitting.value = false
   }
 }
+
+watch(goodsAmount, () => {
+  if (items.value.length) loadFreight()
+})
 
 onMounted(async () => {
   if (!localStorage.getItem('Access-Token')) {
@@ -302,6 +380,7 @@ onMounted(async () => {
   loading.value = true
   try {
     await Promise.all([loadAddress(), loadItems()])
+    await loadFreight()
   } finally {
     loading.value = false
   }
@@ -396,10 +475,42 @@ onMounted(async () => {
   font-weight: 600;
   text-align: right;
 }
+.delivery-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.delivery-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  padding: 12px 14px;
+  cursor: pointer;
+  position: relative;
+}
+.delivery-card.active {
+  border-color: #e1251b;
+  box-shadow: 0 0 0 1px #e1251b inset;
+}
+.d-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.d-tip {
+  color: #888;
+  font-size: 12px;
+}
+.d-freight {
+  margin-top: 8px;
+  color: #e1251b;
+  font-weight: 600;
+}
 .pay-group :deep(.ant-radio-button-wrapper) {
   height: 40px;
   line-height: 38px;
   margin-right: 10px;
+  margin-bottom: 8px;
 }
 .pay-alipay {
   color: #1677ff;
@@ -409,12 +520,24 @@ onMounted(async () => {
   color: #07c160;
   font-weight: 600;
 }
+.pay-cod {
+  color: #fa8c16;
+  font-weight: 600;
+}
 .submit-bar {
   display: flex;
   justify-content: flex-end;
-  align-items: center;
+  align-items: flex-end;
   gap: 18px;
   margin-top: 8px;
+}
+.sum {
+  text-align: right;
+  color: #666;
+  font-size: 13px;
+}
+.sum-line {
+  margin-bottom: 4px;
 }
 .total {
   color: #e1251b;

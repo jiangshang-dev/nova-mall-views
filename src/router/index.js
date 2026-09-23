@@ -10,6 +10,17 @@ const router = createRouter({
     { path: '/checkout', name: 'Checkout', component: () => import('@/views/order/checkout.vue') },
     { path: '/order', name: 'MyOrders', component: () => import('@/views/order/index.vue') },
     { path: '/order/pay/:orderNo', name: 'OrderPay', component: () => import('@/views/order/pay.vue') },
+    {
+      path: '/user',
+      name: 'UserCenter',
+      component: () => import('@/views/user/index.vue'),
+      redirect: '/user/profile',
+      children: [
+        { path: 'profile', name: 'UserProfile', component: () => import('@/views/user/profile.vue') },
+        { path: 'address', name: 'UserAddress', component: () => import('@/views/user/address.vue') },
+        { path: 'orders', name: 'UserOrders', redirect: '/order' },
+      ],
+    },
   ],
   scrollBehavior() {
     return { top: 0 }
