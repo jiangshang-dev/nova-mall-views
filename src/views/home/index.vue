@@ -2,7 +2,7 @@
   <MallShell v-model:model-keyword="keyword" @search="loadGoods">
     <div class="page inner">
       <section class="hero">
-        <aside class="cate">
+        <aside class="cate" @mouseleave="hoverCategory = null">
           <div class="cate-title">
             <Icon icon="ant-design:appstore-outlined" :size="16" />
             全部商品分类
@@ -11,7 +11,8 @@
             <li
               v-for="c in categories"
               :key="c.id"
-              :class="{ active: activeCategory === c.id }"
+              :class="{ active: activeCategory === c.id || hoverCategory?.id === c.id }"
+              @mouseenter="hoverCategory = c"
               @click="selectCategory(c.id)"
             >
               <span>{{ c.name }}</span>
@@ -19,6 +20,25 @@
             </li>
             <li v-if="categories.length === 0" class="empty">暂无分类</li>
           </ul>
+
+          <div v-if="hoverCategory && hoverCategory.children?.length" class="cate-panel">
+            <div v-for="lvl2 in hoverCategory.children" :key="lvl2.id" class="cate-row">
+              <a class="lvl2" @click.prevent="selectCategory(lvl2.id)">
+                {{ lvl2.name }}
+                <Icon icon="ant-design:right-outlined" :size="10" />
+              </a>
+              <div class="lvl3">
+                <a
+                  v-for="lvl3 in lvl2.children || []"
+                  :key="lvl3.id"
+                  @click.prevent="selectCategory(lvl3.id)"
+                >
+                  {{ lvl3.name }}
+                </a>
+                <span v-if="!(lvl2.children && lvl2.children.length)" class="muted">暂无下级</span>
+              </div>
+            </div>
+          </div>
         </aside>
 
         <div class="banner">
@@ -125,7 +145,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MallShell from '@/layouts/MallShell.vue'
-import { listCategories, listGoods } from '@/api/goods'
+import { listGoods, treeCategories } from '@/api/goods'
 
 const placeholder = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80'
 const route = useRoute()
@@ -133,6 +153,7 @@ const keyword = ref(route.query.q || '')
 const loading = ref(false)
 const goods = ref([])
 const categories = ref([])
+const hoverCategory = ref(null)
 const activeCategory = ref(null)
 const token = ref(localStorage.getItem('Access-Token') || '')
 const userName = ref(localStorage.getItem('Nova-UserName') || '会员')
@@ -155,11 +176,23 @@ const banners = [
   },
 ]
 
+function collectDescendantIds(node, acc = []) {
+  if (!node) return acc
+  acc.push(node.id)
+  ;(node.children || []).forEach((c) => collectDescendantIds(c, acc))
+  return acc
+}
+
 const categoryFloors = computed(() =>
-  categories.value.map((c) => ({
-    ...c,
-    items: goods.value.filter((g) => g.categoryId === c.id).slice(0, 4),
-  })).filter((f) => f.items.length)
+  categories.value
+    .map((c) => {
+      const ids = new Set(collectDescendantIds(c))
+      return {
+        ...c,
+        items: goods.value.filter((g) => ids.has(g.categoryId)).slice(0, 4),
+      }
+    })
+    .filter((f) => f.items.length)
 )
 
 function formatPrice(p) {
@@ -173,7 +206,7 @@ function showOrigin(item) {
 }
 
 async function loadCategories() {
-  const res = await listCategories()
+  const res = await treeCategories()
   categories.value = res.data || []
 }
 
@@ -196,6 +229,7 @@ async function loadGoods() {
 
 function selectCategory(id) {
   activeCategory.value = id
+  hoverCategory.value = null
   loadGoods()
 }
 
@@ -233,8 +267,10 @@ onMounted(async () => {
 .cate {
   background: #fff;
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
   min-height: 340px;
+  position: relative;
+  z-index: 5;
 }
 .cate-title {
   background: #e1251b;
@@ -268,6 +304,59 @@ onMounted(async () => {
 .cate .empty {
   color: #999;
   cursor: default;
+}
+.cate-panel {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  width: 520px;
+  min-height: 340px;
+  max-height: 420px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  box-shadow: 2px 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 16px 18px;
+  z-index: 20;
+}
+.cate-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f7f7f7;
+}
+.cate-row:last-child {
+  border-bottom: none;
+}
+.lvl2 {
+  color: #333;
+  font-weight: 600;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.lvl2:hover {
+  color: #e1251b;
+}
+.lvl3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+}
+.lvl3 a {
+  color: #666;
+  font-size: 12px;
+}
+.lvl3 a:hover {
+  color: #e1251b;
+}
+.lvl3 .muted {
+  color: #bbb;
+  font-size: 12px;
 }
 .banner {
   background: #fff;

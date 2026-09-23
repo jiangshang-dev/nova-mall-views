@@ -11,3 +11,7 @@ export function getGoods(id) {
 export function listCategories() {
   return request.get('/goods/category/list')
 }
+
+export function treeCategories() {
+  return request.get('/goods/category/tree')
+}
